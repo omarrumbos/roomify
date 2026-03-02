@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Roomify — Room Setup</title>
+  <link rel="stylesheet" href="/style.css" />
+  <style>
+    body { font-family: Arial, sans-serif; padding: 40px; }
+    .container { max-width: 900px; margin: auto; }
+    .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+    input, select { padding: 8px; }
+    button { padding: 12px 18px; margin-top: 15px; cursor: pointer; }
+    .result { margin-top: 30px; padding: 20px; border-radius: 8px; background: #f2f2f2; }
+    .error { color: red; margin-top: 10px; }
+  </style>
+</head>
+<body>
+
+<div class="container">
+  <h1>Tell us about your room</h1>
+  <p>Physics-first. No preaching. Just clarity.</p>
+  <p><strong>Units:</strong> feet</p>
+
+  <form id="roomForm">
+    <div class="grid">
+      <input type="number" name="lengthFt" placeholder="Length (ft)" required />
+      <input type="number" name="widthFt" placeholder="Width (ft)" required />
+      <input type="number" name="heightFt" placeholder="Height (ft)" required />
+
+      <input type="number" name="listeningDistanceFt" placeholder="Listening distance (ft)" />
+      <input type="number" name="speakerDistanceFt" placeholder="Speaker distance from wall (ft)" />
+
+      <select name="windows">
+        <option value="">Window(s) in room?</option>
+        <option value="yes">Yes</option>
+        <option value="no">No</option>
+      </select>
+
+      <select name="surface">
+        <option value="">Surface type</option>
+        <option value="hard">Hard (concrete, glass, tile)</option>
+        <option value="mixed">Mixed</option>
+        <option value="soft">Soft (carpet, curtains)</option>
+      </select>
+
+      <select name="treatment">
+        <option value="">Current treatment</option>
+        <option value="none">None</option>
+        <option value="partial">Partial</option>
+        <option value="full">Full</option>
+      </select>
+
+      <select name="goal">
+        <option value="">Goal</option>
+        <option value="mixing">Mixing / production</option>
+        <option value="recording">Recording</option>
+        <option value="general">General listening</option>
+      </select>
+    </div>
+
+    <button type="submit">Get starter recommendation</button>
+  </form>
+
+  <div id="error" class="error"></div>
+  <div id="result" class="result" style="display:none;"></div>
+</div>
+
+<script>
+  const form = document.getElementById("roomForm");
+  const resultDiv = document.getElementById("result");
+  const errorDiv = document.getElementById("error");
+
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    errorDiv.textContent = "";
+    resultDiv.style.display = "none";
+
+    const formData = new FormData(form);
+    const data = Object.fromEntries(formData.entries());
+
+    try {
+      const response = await fetch("/api/recommend", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data)
+      });
+
+      if (!response.ok) {
+        throw new Error("Server returned an error");
+      }
+
+      const json = await response.json();
+
+      resultDiv.innerHTML = `
+        <h2>${json.title}</h2>
+        <p>${json.message}</p>
+        <p><strong>Severity:</strong> ${json.severity}</p>
+        <p><strong>Priority:</strong> ${json.topPriority}</p>
+        <p><strong>Reflection Score:</strong> ${json.scores.reflection}</p>
+        <p><strong>Bass Score:</strong> ${json.scores.bass}</p>
+        <p style="margin-top:10px; font-size:12px; color:#555;">
+          ${json.note}
+        </p>
+      `;
+
+      resultDiv.style.display = "block";
+
+    } catch (err) {
+      console.error(err);
+      errorDiv.textContent = "Something went wrong. Please try again.";
+    }
+  });
+</script>
+
+</body>
+</html>
