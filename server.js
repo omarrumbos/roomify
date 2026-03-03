@@ -1,4 +1,16 @@
-// server.js
+// server.js — Roomify (landing + room + scoring + stored sessions + recommendations + admin)
+//
+// Files used:
+// - public/index.html
+// - public/room.html
+// - public/style.css
+// - waitlist.csv
+// - beta_sessions.jsonl
+//
+// ENV (optional but recommended):
+// - PORT
+// - ADMIN_TOKEN   (protects /admin endpoints)
+
 const express = require("express");
 const path = require("path");
 const fs = require("fs");
@@ -7,360 +19,354 @@ const crypto = require("crypto");
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// --------------------
-// Middleware
-// --------------------
-app.use(express.urlencoded({ extended: true })); // for HTML form posts
-app.use(express.json()); // for fetch JSON
-app.use(express.static(path.join(__dirname, "public"))); // serve /public
+// ---------- Paths ----------
+const ROOT = __dirname;
+const PUBLIC_DIR = path.join(ROOT, "public");
+const WAITLIST_CSV = path.join(ROOT, "waitlist.csv");
+const SESSIONS_JSONL = path.join(ROOT, "beta_sessions.jsonl");
 
-// --------------------
-// Pages
-// --------------------
+// ---------- Middleware ----------
+app.use(express.urlencoded({ extended: true })); // form posts
+app.use(express.json({ limit: "1mb" }));        // JSON posts
+
+// Static LAST is fine, but we’ll also explicitly serve pages.
+// (If you prefer, you can move this above routes—either works.)
+app.use(express.static(PUBLIC_DIR));
+
+// ---------- Helpers ----------
+function safeNumber(v, fallback = null) {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+function clamp(n, min, max) {
+  return Math.max(min, Math.min(max, n));
+}
+
+function sha1(str) {
+  return crypto.createHash("sha1").update(String(str)).digest("hex");
+}
+
+function ensureFileHeader(filePath, headerLine) {
+  if (!fs.existsSync(filePath)) {
+    fs.writeFileSync(filePath, headerLine, "utf8");
+  }
+}
+
+function appendLine(filePath, line) {
+  fs.appendFileSync(filePath, line, "utf8");
+}
+
+// Minimal admin auth (token via query/header)
+function requireAdmin(req, res, next) {
+  const token = process.env.ADMIN_TOKEN;
+  if (!token) {
+    // If you haven't set ADMIN_TOKEN, allow access (useful in early dev).
+    // For production: set ADMIN_TOKEN on Render to lock it.
+    return next();
+  }
+  const provided =
+    req.query.token ||
+    req.get("x-admin-token") ||
+    (req.get("authorization") || "").replace(/^Bearer\s+/i, "");
+
+  if (provided !== token) return res.status(401).send("Unauthorized");
+  next();
+}
+
+// ---------- Scoring + Recommendations ----------
+function scoreRoom(input) {
+  // Expected inputs (numbers in feet):
+  // length, width, height, listeningDistance, speakerDistanceFromWall
+  // plus: windows ("yes"/"no"), surfaceType, currentTreatment, goal
+
+  const length = safeNumber(input.length);
+  const width = safeNumber(input.width);
+  const height = safeNumber(input.height);
+  const listeningDistance = safeNumber(input.listeningDistance);
+  const speakerDistanceFromWall = safeNumber(input.speakerDistanceFromWall);
+
+  // Basic validity score
+  let validity = 100;
+  if (!length || length <= 0) validity -= 25;
+  if (!width || width <= 0) validity -= 25;
+  if (!height || height <= 0) validity -= 15;
+  if (!listeningDistance || listeningDistance <= 0) validity -= 15;
+  if (speakerDistanceFromWall === null || speakerDistanceFromWall < 0) validity -= 20;
+  validity = clamp(validity, 0, 100);
+
+  // Simple “risk” heuristics (0 = low risk, 100 = high risk)
+  let risk = 0;
+
+  // Small rooms tend to have stronger modal issues
+  if (length && width) {
+    const area = length * width;
+    if (area < 120) risk += 25;
+    else if (area < 180) risk += 15;
+    else risk += 5;
+  } else {
+    risk += 20;
+  }
+
+  // Very low speaker-to-wall distance increases boundary interference / bass buildup
+  if (speakerDistanceFromWall !== null) {
+    if (speakerDistanceFromWall < 1.0) risk += 25;
+    else if (speakerDistanceFromWall < 2.0) risk += 15;
+    else risk += 5;
+  }
+
+  // Hard surfaces + no treatment = more reflections
+  const surface = String(input.surfaceType || "").toLowerCase();
+  const treatment = String(input.currentTreatment || "").toLowerCase();
+
+  const hardSurface =
+    surface.includes("hard") ||
+    surface.includes("tile") ||
+    surface.includes("concrete") ||
+    surface.includes("glass") ||
+    surface.includes("wood");
+
+  const noTreatment =
+    treatment.includes("none") ||
+    treatment.includes("no") ||
+    treatment.includes("untreated") ||
+    treatment.trim() === "";
+
+  if (hardSurface) risk += 20;
+  if (noTreatment) risk += 20;
+
+  // Windows add reflections if present
+  const windows = String(input.windows || "").toLowerCase();
+  if (windows.includes("yes")) risk += 10;
+
+  risk = clamp(risk, 0, 100);
+
+  // Turn risk into score (higher score = better)
+  const roomScore = clamp(100 - risk, 0, 100);
+
+  // Optional “tone score” placeholder (v2 ready)
+  // This can be replaced with your tone model later.
+  const goal = String(input.goal || "").toLowerCase();
+  let toneScore = 75;
+  if (goal.includes("mix") || goal.includes("master")) toneScore = 80;
+  if (goal.includes("listen") || goal.includes("hi-fi")) toneScore = 70;
+
+  return {
+    validity,
+    roomScore,
+    toneScore,
+    risk,
+  };
+}
+
+function buildRecommendations(input, scores) {
+  const recs = [];
+
+  const speakerDistanceFromWall = safeNumber(input.speakerDistanceFromWall, 0);
+  const treatment = String(input.currentTreatment || "").toLowerCase();
+  const noTreatment =
+    treatment.includes("none") ||
+    treatment.includes("no") ||
+    treatment.includes("untreated") ||
+    treatment.trim() === "";
+
+  // Priority 1: placement
+  if (speakerDistanceFromWall < 2) {
+    recs.push({
+      priority: 1,
+      title: "Increase speaker distance from the front wall",
+      why: "Reduces boundary bass buildup and improves low-end clarity.",
+      action: "Try moving speakers forward in 6–12 inch steps until bass tightens.",
+    });
+  } else {
+    recs.push({
+      priority: 1,
+      title: "Lock in triangle geometry",
+      why: "Improves imaging and center focus.",
+      action: "Aim for an equilateral triangle: speaker-to-speaker ≈ listening distance.",
+    });
+  }
+
+  // Priority 2: early reflections
+  if (noTreatment) {
+    recs.push({
+      priority: 2,
+      title: "Treat first reflection points",
+      why: "Cuts harshness and improves stereo imaging fast.",
+      action: "Add panels at side reflection points + ceiling cloud if possible.",
+    });
+  } else {
+    recs.push({
+      priority: 2,
+      title: "Verify your first reflection coverage",
+      why: "Even treated rooms often miss key reflection zones.",
+      action: "Do a quick mirror test on side walls and adjust panel placement.",
+    });
+  }
+
+  // Priority 3: bass control
+  if (scores.risk >= 60) {
+    recs.push({
+      priority: 3,
+      title: "Add bass trapping",
+      why: "High risk score suggests modal buildup and uneven bass response.",
+      action: "Start with corner traps (front corners first), then rear corners.",
+    });
+  } else {
+    recs.push({
+      priority: 3,
+      title: "Fine-tune low end with placement + light trapping",
+      why: "You’re close—small changes will make the bass more consistent.",
+      action: "Try small seat movements (6–12 inches) and add light corner treatment.",
+    });
+  }
+
+  // Small optional note if windows exist
+  const windows = String(input.windows || "").toLowerCase();
+  if (windows.includes("yes")) {
+    recs.push({
+      priority: 4,
+      title: "Control window reflections",
+      why: "Glass reflections can brighten the room and smear imaging.",
+      action: "Use thick curtains or movable absorption near the window area.",
+    });
+  }
+
+  return recs;
+}
+
+// ---------- Pages ----------
 app.get("/", (req, res) => {
-  res.sendFile(path.join(__dirname, "public", "index.html"));
+  res.sendFile(path.join(PUBLIC_DIR, "index.html"));
 });
 
+// Support both /room and /room.html (avoids “Not Found” surprises)
 app.get("/room", (req, res) => {
-  res.sendFile(path.join(__dirname, "public", "room.html"));
+  res.sendFile(path.join(PUBLIC_DIR, "room.html"));
+});
+app.get("/room.html", (req, res) => {
+  res.sendFile(path.join(PUBLIC_DIR, "room.html"));
 });
 
-// --------------------
-// Waitlist -> waitlist.csv
-// --------------------
+app.get("/health", (req, res) => {
+  res.json({ ok: true, service: "roomify", time: new Date().toISOString() });
+});
+
+// ---------- Waitlist ----------
 app.post("/waitlist", (req, res) => {
   try {
     const email = String(req.body.email || "").trim().toLowerCase();
     if (!email) return res.status(400).json({ ok: false, error: "Missing email" });
 
-    const filePath = path.join(__dirname, "waitlist.csv");
+    ensureFileHeader(WAITLIST_CSV, "timestamp,email\n");
+    appendLine(WAITLIST_CSV, `${new Date().toISOString()},${email}\n`);
 
-    // Create header if file doesn't exist
-    if (!fs.existsSync(filePath)) {
-      fs.writeFileSync(filePath, "timestamp,email\n");
-    }
-
-    fs.appendFileSync(filePath, `${new Date().toISOString()},${email}\n`);
     return res.json({ ok: true });
   } catch (err) {
-    console.error("waitlist error:", err);
-    return res.status(500).json({ ok: false, error: "Internal server error" });
+    return res.status(500).json({ ok: false, error: "Server error" });
   }
 });
 
-// --------------------
-// Room Engine (V1)
-// Formula-driven scores -> reflection score -> priority
-// --------------------
-function getStarterRecommendation(inputs) {
-  // Normalize inputs
-  const lengthFt = Number(inputs.lengthFt) || 0;
-  const widthFt = Number(inputs.widthFt) || 0;
-  const heightFt = Number(inputs.heightFt) || 0;
-
-  const listeningDistanceFt = Number(inputs.listeningDistanceFt) || 0;
-  const speakerDistanceFt = Number(inputs.speakerDistanceFt) || 0;
-
-  const windows = String(inputs.windows || "").toLowerCase(); // "yes" / "no"
-  const surface = String(inputs.surface || "").toLowerCase(); // "hard" / "mixed" / "soft"
-  const treatment = String(inputs.treatment || "").toLowerCase(); // "none" / "partial" / "full"
-  const goal = String(inputs.goal || "").toLowerCase(); // "mixing" etc.
-
-  // Basic validation (keep it permissive for beta)
-  const hasDims = lengthFt > 0 && widthFt > 0 && heightFt > 0;
-
-  // Reflection score (0-5) — aligned with your sheet idea:
-  // hard surface +2, windows yes +1, treatment none +2 (max 5)
-  let reflectionScore = 0;
-  if (surface === "hard") reflectionScore += 2;
-  if (windows === "yes") reflectionScore += 1;
-  if (treatment === "none") reflectionScore += 2;
-  reflectionScore = Math.min(reflectionScore, 5);
-
-  // Bass score (simple/placeholder, still physics-first)
-  // Small rooms + short speaker distance => more risk
-  let bassScore = 0;
-  if (hasDims) {
-    const volume = lengthFt * widthFt * heightFt; // ft^3
-    if (volume > 0 && volume < 900) bassScore += 2;      // very small
-    if (volume >= 900 && volume < 1400) bassScore += 1;  // small
-  }
-  if (speakerDistanceFt > 0 && speakerDistanceFt < 2) bassScore += 1;
-  bassScore = Math.min(bassScore, 5);
-
-  // Decide top priority from scores
-  let topPriority = "Balanced — evaluate both";
-  if (reflectionScore >= bassScore + 2) topPriority = "Early Reflection Control";
-  else if (bassScore >= reflectionScore + 2) topPriority = "Focus on Bass Treatment";
-
-  // Severity from max score (like your sheet)
-  const maxScore = Math.max(reflectionScore, bassScore);
-  let severity = "Low";
-  if (maxScore >= 4) severity = "High";
-  else if (maxScore >= 2) severity = "Medium";
-
-  // Recommendation text (mentor tone, physics-first)
-  let title = "Starter recommendation";
-  let message =
-    "Start with simple physics wins: placement symmetry, avoid corners, and control early reflections first.";
-
-  if (topPriority === "Early Reflection Control") {
-    title = "Early reflections are your main issue";
-    message =
-      "Install broadband panels at first reflection points before adding bass traps. Treat side walls and ceiling first. Prioritize symmetry and a stable stereo image for mixing.";
-  } else if (topPriority === "Focus on Bass Treatment") {
-    title = "Low-frequency buildup is your main issue";
-    message =
-      "Start with bass control: treat corners first and avoid placing speakers too close to the front wall. Then refine early reflections once low-end is steadier.";
-  } else {
-    title = "Balanced starting point";
-    message =
-      "You’re in a balanced zone. Start with first reflection points + basic bass control, then refine once you hear the change.";
-  }
-
-  const note = "Based on limited inputs. Upgrade later for full physics depth + diagrams.";
-
-  return {
-    ok: true,
-    title,
-    message,
-    severity,
-    topPriority,
-    scores: {
-      reflection: reflectionScore,
-      bass: bassScore,
-    },
-    note,
-    debug: {
-      lengthFt,
-      widthFt,
-      heightFt,
-      listeningDistanceFt,
-      speakerDistanceFt,
-      windows,
-      surface,
-      treatment,
-      goal,
-    },
-  };
-}
-
-// --------------------
-// API Route (JSON only)
-// IMPORTANT: room.html must fetch this endpoint and parse JSON.
-// --------------------
+// ---------- Room -> Score + Recommendations + Session Storage ----------
 app.post("/api/recommend", (req, res) => {
   try {
-    const inputs = req.body || {};
-    const recommendation = getStarterRecommendation(inputs);
-
-    // Log beta session
-    const session = {
-      ts: new Date().toISOString(),
-      sessionId: crypto.randomUUID(),
-      inputs,
-      output: recommendation,
+    const input = {
+      // Accept either camelCase or form-like names
+      length: req.body.length ?? req.body.lengthFt,
+      width: req.body.width ?? req.body.widthFt,
+      height: req.body.height ?? req.body.heightFt,
+      listeningDistance: req.body.listeningDistance ?? req.body.listeningDistanceFt,
+      speakerDistanceFromWall: req.body.speakerDistanceFromWall ?? req.body.speakerDistanceFromWallFt,
+      windows: req.body.windows,
+      surfaceType: req.body.surfaceType,
+      currentTreatment: req.body.currentTreatment,
+      goal: req.body.goal,
+      // Optional “tone” input for v2
+      tone: req.body.tone,
     };
 
-    const filePath = path.join(__dirname, "beta_sessions.jsonl");
-    fs.appendFileSync(filePath, JSON.stringify(session) + "\n");
+    const scores = scoreRoom(input);
+    const recommendations = buildRecommendations(input, scores);
 
-    return res.json(recommendation);
-  } catch (error) {
-    console.error("Server error:", error);
-    return res.status(500).json({ ok: false, error: "Internal server error" });
-  }
-});
+    // Create session
+    const sessionId = sha1(
+      `${Date.now()}|${req.ip}|${req.get("user-agent") || ""}|${Math.random()}`
+    ).slice(0, 12);
 
-// --------------------
-// ADMIN DASHBOARD (reads beta_sessions.jsonl)
-// --------------------
-const BETA_FILE = path.join(__dirname, "beta_sessions.jsonl");
+    const session = {
+      id: sessionId,
+      ts: new Date().toISOString(),
+      ip: req.ip,
+      ua: req.get("user-agent") || "",
+      input,
+      scores,
+      recommendations,
+    };
 
-function readSessions() {
-  if (!fs.existsSync(BETA_FILE)) return [];
-  const raw = fs.readFileSync(BETA_FILE, "utf8").trim();
-  if (!raw) return [];
-  return raw
-    .split("\n")
-    .map((line) => {
-      try {
-        return JSON.parse(line);
-      } catch {
-        return null;
-      }
-    })
-    .filter(Boolean);
-}
+    appendLine(SESSIONS_JSONL, JSON.stringify(session) + "\n");
 
-function avg(arr) {
-  if (!arr.length) return 0;
-  return arr.reduce((a, b) => a + b, 0) / arr.length;
-}
-
-function mode(arr) {
-  const counts = {};
-  arr.forEach((v) => (counts[v] = (counts[v] || 0) + 1));
-  let max = 0;
-  let value = null;
-  for (const k in counts) {
-    if (counts[k] > max) {
-      max = counts[k];
-      value = k;
-    }
-  }
-  return { value, count: max };
-}
-
-app.get("/admin", (req, res) => {
-  const sessions = readSessions();
-
-  const severities = sessions.map((s) => s.output?.severity).filter(Boolean);
-  const priorities = sessions.map((s) => s.output?.topPriority).filter(Boolean);
-  const reflectionScores = sessions
-    .map((s) => s.output?.scores?.reflection)
-    .filter((n) => typeof n === "number");
-  const bassScores = sessions
-    .map((s) => s.output?.scores?.bass)
-    .filter((n) => typeof n === "number");
-
-  const sevMode = mode(severities);
-  const prioMode = mode(priorities);
-
-  const html = `
-  <html>
-  <head>
-    <title>Roomify Admin</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <style>
-      body { font-family: Arial, sans-serif; background:#0f0f10; color:#eee; padding:24px; }
-      h1 { margin:0 0 16px; }
-      .card { background:#1b1b1e; padding:16px; border-radius:10px; margin-bottom:16px; border:1px solid #2a2a2f; }
-      table { width:100%; border-collapse:collapse; margin-top:12px; }
-      th, td { border:1px solid #2a2a2f; padding:8px; font-size:12px; }
-      th { background:#18181b; text-align:left; }
-      .muted { color:#aaa; font-size:12px; }
-      a { color:#9ad; }
-    </style>
-  </head>
-  <body>
-    <h1>Roomify Admin Dashboard</h1>
-    <div class="card">
-      <div><strong>Total Sessions:</strong> ${sessions.length}</div>
-      <div><strong>Most Common Severity:</strong> ${sevMode.value || "-"} (${sevMode.count || 0})</div>
-      <div><strong>Most Common Priority:</strong> ${prioMode.value || "-"} (${prioMode.count || 0})</div>
-      <div><strong>Avg Reflection Score:</strong> ${avg(reflectionScores).toFixed(2)}</div>
-      <div><strong>Avg Bass Score:</strong> ${avg(bassScores).toFixed(2)}</div>
-      <div class="muted" style="margin-top:10px;">Showing latest 25 sessions.</div>
-    </div>
-
-    <div class="card">
-      <table>
-        <tr>
-          <th>Time</th>
-          <th>Dims (ft)</th>
-          <th>Severity</th>
-          <th>Priority</th>
-          <th>Reflection</th>
-          <th>Bass</th>
-        </tr>
-        ${sessions
-          .slice(-25)
-          .reverse()
-          .map(
-            (s) => `
-          <tr>
-            <td>${new Date(s.ts).toLocaleString()}</td>
-            <td>${s.inputs.lengthFt || "-"}×${s.inputs.widthFt || "-"}×${s.inputs.heightFt || "-"}</td>
-            <td>${s.output?.severity || "-"}</td>
-            <td>${s.output?.topPriority || "-"}</td>
-            <td>${s.output?.scores?.reflection ?? "-"}</td>
-            <td>${s.output?.scores?.bass ?? "-"}</td>
-          </tr>`
-          )
-          .join("")}
-      </table>
-    </div>
-  </body>
-  </html>
-  `;
-
-  res.send(html);
-});
-
-// --------------------
-// Start server
-// --------------------
-// =========================
-// Admin Dashboard
-// =========================
-app.get("/admin", (req, res) => {
-  try {
-    const filePath = path.join(__dirname, "beta_sessions.jsonl");
-
-    if (!fs.existsSync(filePath)) {
-      return res.send("<h1>No sessions yet.</h1>");
-    }
-
-    const raw = fs.readFileSync(filePath, "utf-8");
-
-    const sessions = raw
-      .split("\n")
-      .filter(Boolean)
-      .map(line => JSON.parse(line));
-
-    const rows = sessions.reverse().map(s => {
-      return `
-        <tr>
-          <td>${s.ts}</td>
-          <td>${s.inputs.lengthFt}x${s.inputs.widthFt}x${s.inputs.heightFt}</td>
-          <td>${s.inputs.goal}</td>
-          <td>${s.output.severity}</td>
-          <td>${s.output.topPriority}</td>
-          <td>${s.output.scores.reflection}</td>
-          <td>${s.output.scores.bass}</td>
-        </tr>
-      `;
-    }).join("");
-
-    res.send(`
-      <html>
-      <head>
-        <title>Roomify Admin</title>
-        <style>
-          body { font-family: Arial; padding: 40px; }
-          table { border-collapse: collapse; width: 100%; }
-          th, td { border: 1px solid #ddd; padding: 8px; }
-          th { background: #f3f4f6; text-align: left; }
-        </style>
-      </head>
-      <body>
-        <h1>Roomify Beta Sessions</h1>
-        <table>
-          <thead>
-            <tr>
-              <th>Timestamp</th>
-              <th>Room</th>
-              <th>Goal</th>
-              <th>Severity</th>
-              <th>Top Priority</th>
-              <th>Reflection</th>
-              <th>Bass</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${rows}
-          </tbody>
-        </table>
-      </body>
-      </html>
-    `);
-
+    return res.json({
+      ok: true,
+      sessionId,
+      scores,
+      recommendations,
+    });
   } catch (err) {
-    console.error(err);
-    res.status(500).send("Admin error");
+    return res.status(500).json({ ok: false, error: "Server error" });
   }
 });
-app.listen(PORT, () => {
-  console.log(`Roomify running at http://localhost:${PORT}`);
+
+// ---------- Admin (sessions + waitlist download) ----------
+app.get("/admin", requireAdmin, (req, res) => {
+  res.type("text").send(
+`Roomify Admin
+
+Endpoints:
+- /admin/sessions?limit=50
+- /admin/waitlist (download csv)
+
+Tip: set ADMIN_TOKEN on Render to lock these routes.`
+  );
+});
+
+app.get("/admin/sessions", requireAdmin, (req, res) => {
+  try {
+    const limit = clamp(safeNumber(req.query.limit, 50), 1, 500);
+
+    if (!fs.existsSync(SESSIONS_JSONL)) return res.json({ ok: true, sessions: [] });
+
+    const lines = fs.readFileSync(SESSIONS_JSONL, "utf8")
+      .trim()
+      .split("\n")
+      .filter(Boolean);
+
+    const last = lines.slice(-limit).reverse().map((l) => {
+      try { return JSON.parse(l); } catch { return null; }
+    }).filter(Boolean);
+
+    res.json({ ok: true, sessions: last });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: "Server error" });
+  }
+});
+
+app.get("/admin/waitlist", requireAdmin, (req, res) => {
+  try {
+    if (!fs.existsSync(WAITLIST_CSV)) {
+      return res.status(404).send("No waitlist.csv yet");
+    }
+    res.download(WAITLIST_CSV, "waitlist.csv");
+  } catch (err) {
+    res.status(500).send("Server error");
+  }
+});
+
+// ---------- 404 fallback ----------
+app.use((req, res) => {
+  res.status(404).send("Not Found");
+});
+
+// ---------- Start ----------
+app.listen(PORT, "0.0.0.0", () => {
+  console.log(`Roomify running on port ${PORT}`);
 });
