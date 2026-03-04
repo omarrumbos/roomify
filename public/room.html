@@ -3,15 +3,14 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Roomify — Room Setup</title>
+  <title>Roomify — Room Health Check</title>
   <link rel="stylesheet" href="/style.css" />
   <style>
-    /* Minimal fallback styling in case style.css is light */
     .container { max-width: 980px; margin: 0 auto; padding: 40px 20px; }
-    h1 { font-size: 56px; margin: 0 0 12px; line-height: 1.05; letter-spacing: -0.02em; }
+    h1 { font-size: 54px; margin: 0 0 10px; line-height: 1.05; letter-spacing: -0.02em; }
     .sub { margin: 0 0 22px; opacity: 0.8; }
+    .muted { opacity: 0.7; font-size: 13px; }
     .row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-top: 14px; }
-    .row.two { grid-template-columns: repeat(2, 1fr); }
     label { display: block; font-size: 12px; opacity: 0.75; margin-bottom: 6px; }
     input, select {
       width: 100%;
@@ -33,33 +32,76 @@
       cursor: pointer;
     }
     button:disabled { opacity: 0.6; cursor: not-allowed; }
-    .card {
-      margin-top: 26px;
-      border-radius: 14px;
-      border: 1px solid rgba(0,0,0,0.12);
-      padding: 18px;
-      background: rgba(0,0,0,0.02);
+
+    /* Report */
+    .report { margin-top: 26px; border-radius: 14px; border: 1px solid rgba(0,0,0,0.12); padding: 18px; background: rgba(0,0,0,0.02); }
+    .report-header { display:flex; flex-direction:column; gap: 10px; }
+    .brand { font-weight: 700; letter-spacing: -0.01em; font-size: 18px; }
+    .report-title { font-size: 26px; font-weight: 700; margin: 0; }
+    .badge {
+      display: inline-flex; align-items: center; gap: 8px;
+      padding: 7px 10px; border-radius: 999px;
+      background: rgba(0,0,0,0.06); font-size: 12px;
+      width: fit-content;
     }
-    .muted { opacity: 0.7; font-size: 13px; }
+    .dot { width: 9px; height: 9px; border-radius: 999px; background: #999; }
+    .section-title { margin-top: 18px; font-size: 14px; font-weight: 700; opacity: 0.85; }
     .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 10px; }
-    .pill { display: inline-block; padding: 6px 10px; border-radius: 999px; background: rgba(0,0,0,0.06); font-size: 12px; }
-    .rec { padding: 12px; border-radius: 12px; border: 1px solid rgba(0,0,0,0.10); background: #fff; margin-top: 10px; }
-    .rec h3 { margin: 0 0 6px; font-size: 16px; }
-    .rec p { margin: 0; font-size: 13px; opacity: 0.85; }
+    .panel { background:#fff; border: 1px solid rgba(0,0,0,0.10); border-radius: 12px; padding: 12px; }
+    .steps { margin-top: 10px; }
+    .step { background:#fff; border: 1px solid rgba(0,0,0,0.10); border-radius: 12px; padding: 12px; margin-top: 10px; }
+    .step h3 { margin: 0 0 6px; font-size: 16px; }
+    .step .meta { margin-top: 8px; font-size: 12px; opacity: 0.75; }
     .error { color: #b00020; font-weight: 600; margin-top: 10px; }
+
+    /* Fullscreen analyzing overlay */
+    .overlay {
+      position: fixed; inset: 0;
+      background: rgba(255,255,255,0.96);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 9999;
+    }
+    .overlay.on { display: flex; }
+    .overlay-inner { text-align: center; }
+    .logo {
+      font-size: 44px;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+    }
+    .spinner {
+      margin: 18px auto 0;
+      width: 18px; height: 18px;
+      border: 2px solid rgba(0,0,0,0.15);
+      border-top-color: rgba(0,0,0,0.7);
+      border-radius: 999px;
+      animation: spin 0.9s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
     @media (max-width: 780px){
       h1 { font-size: 40px; }
       .row { grid-template-columns: 1fr; }
-      .row.two { grid-template-columns: 1fr; }
       .grid2 { grid-template-columns: 1fr; }
+      .logo { font-size: 38px; }
     }
   </style>
 </head>
+
 <body>
+  <!-- Analyzing overlay -->
+  <div id="overlay" class="overlay" aria-hidden="true">
+    <div class="overlay-inner">
+      <div class="logo">roomify</div>
+      <div class="muted" style="margin-top:8px;">Analyzing your room…</div>
+      <div class="spinner" aria-label="loading"></div>
+    </div>
+  </div>
+
   <div class="container">
     <h1>Tell us about your room</h1>
     <p class="sub">Physics-first. No preaching. Just clarity.</p>
-
     <div class="muted"><strong>Units:</strong> feet</div>
 
     <form id="roomForm" autocomplete="off">
@@ -127,37 +169,47 @@
         </div>
       </div>
 
-      <button id="submitBtn" type="submit">Get starter recommendation</button>
+      <button id="submitBtn" type="submit">Let’s get you roomified</button>
       <div id="error" class="error" style="display:none;"></div>
     </form>
 
-    <div id="results" class="card" style="display:none;">
-      <div class="muted">Session</div>
-      <div style="margin-top:6px;">
-        <span class="pill" id="sessionIdPill">sessionId: —</span>
+    <!-- Report -->
+    <div id="report" class="report" style="display:none;">
+      <div class="report-header">
+        <div class="brand">roomify</div>
+        <div>
+          <div class="report-title">Room Health Check</div>
+          <div class="muted" id="reportIdLine">Roomify Report ID: —</div>
+        </div>
+
+        <div class="badge" id="healthBadge">
+          <span class="dot" id="healthDot"></span>
+          <span><strong>Status:</strong> <span id="healthStatus">—</span></span>
+        </div>
+
+        <div id="healthMessage" class="muted">—</div>
+        <div id="healthPotential" class="muted"><strong>With a few changes your room can reach:</strong> —</div>
       </div>
 
-      <div class="grid2" style="margin-top:14px;">
-        <div class="card" style="margin:0;">
-          <div class="muted">Scores</div>
-          <div style="margin-top:10px; line-height:1.9;">
-            <div><strong>Validity:</strong> <span id="validity">—</span></div>
-            <div><strong>Room Score:</strong> <span id="roomScore">—</span></div>
-            <div><strong>Tone Score:</strong> <span id="toneScore">—</span></div>
-          </div>
+      <div class="section-title">Scores</div>
+      <div class="grid2">
+        <div class="panel">
+          <div class="muted">Room Score</div>
+          <div style="font-size:28px;font-weight:700;margin-top:4px;" id="roomScore">—</div>
         </div>
-        <div class="card" style="margin:0;">
-          <div class="muted">Summary</div>
-          <div style="margin-top:10px;">
-            <div id="summaryText" class="muted">—</div>
-          </div>
+        <div class="panel">
+          <div class="muted">Tone Score</div>
+          <div style="font-size:28px;font-weight:700;margin-top:4px;" id="toneScore">—</div>
         </div>
       </div>
 
-      <div style="margin-top:16px;">
-        <div class="muted">Recommendations</div>
-        <div id="recs"></div>
+      <div class="panel" style="margin-top:14px;">
+        <div class="muted">Measurement Validity</div>
+        <div style="font-size:20px;font-weight:700;margin-top:4px;" id="validity">—</div>
       </div>
+
+      <div class="section-title">Recommended Fixes</div>
+      <div id="steps" class="steps"></div>
     </div>
   </div>
 
@@ -165,14 +217,18 @@
     const form = document.getElementById("roomForm");
     const btn = document.getElementById("submitBtn");
     const errorEl = document.getElementById("error");
+    const overlay = document.getElementById("overlay");
 
-    const resultsEl = document.getElementById("results");
-    const sessionIdPill = document.getElementById("sessionIdPill");
-    const validityEl = document.getElementById("validity");
+    const report = document.getElementById("report");
+    const reportIdLine = document.getElementById("reportIdLine");
+    const healthStatusEl = document.getElementById("healthStatus");
+    const healthMessageEl = document.getElementById("healthMessage");
+    const healthPotentialEl = document.getElementById("healthPotential");
+    const healthDot = document.getElementById("healthDot");
     const roomScoreEl = document.getElementById("roomScore");
     const toneScoreEl = document.getElementById("toneScore");
-    const summaryTextEl = document.getElementById("summaryText");
-    const recsEl = document.getElementById("recs");
+    const validityEl = document.getElementById("validity");
+    const stepsEl = document.getElementById("steps");
 
     function showError(msg) {
       errorEl.textContent = msg;
@@ -182,51 +238,114 @@
       errorEl.textContent = "";
       errorEl.style.display = "none";
     }
-
     function toNumber(value) {
       const n = Number(value);
       return Number.isFinite(n) ? n : null;
     }
+    function escapeHtml(str) {
+      return String(str).replace(/[&<>"']/g, (m) => ({
+        "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;",
+      }[m]));
+    }
 
-    function renderRecommendations(recommendations) {
-      recsEl.innerHTML = "";
+    function getRoomHealth(score) {
+      if (score >= 80) return "Excellent";
+      if (score >= 60) return "Good";
+      if (score >= 40) return "Needs Attention";
+      return "Problematic";
+    }
+
+    function getHealthColor(health) {
+      // subtle “report” colors
+      if (health === "Excellent") return "#1f8f4a";
+      if (health === "Good") return "#2e9f5e";
+      if (health === "Needs Attention") return "#c98a19";
+      return "#b00020";
+    }
+
+    function getHealthMessage(health) {
+      if (health === "Excellent") {
+        return "Your room is already in great shape. A few refinements can make it even more consistent.";
+      }
+      if (health === "Good") {
+        return "Your room is solid. A couple of targeted improvements can bring noticeably better clarity.";
+      }
+      if (health === "Needs Attention") {
+        return "Your room is workable, but a few placement and reflection adjustments will noticeably improve clarity.";
+      }
+      return "Your room is fighting your monitoring right now — but the good news is a few focused fixes will help fast.";
+    }
+
+    function getNextTier(health) {
+      if (health === "Problematic") return "Needs Attention";
+      if (health === "Needs Attention") return "Good";
+      if (health === "Good") return "Excellent";
+      return "Excellent";
+    }
+
+    function renderSteps(recommendations) {
+      stepsEl.innerHTML = "";
+
       if (!Array.isArray(recommendations) || recommendations.length === 0) {
-        recsEl.innerHTML = `<div class="muted" style="margin-top:8px;">No recommendations returned.</div>`;
+        stepsEl.innerHTML = `<div class="muted" style="margin-top:8px;">No fixes returned.</div>`;
         return;
       }
 
-      recommendations.forEach((rec, idx) => {
-        // Flexible rendering: works even if rec fields differ a bit
-        const title = rec.title || rec.name || rec.fix || `Recommendation ${idx + 1}`;
+      // Sort by priority if present, then take top 3 as “steps”
+      const sorted = [...recommendations].sort((a,b) => {
+        const pa = (a.priority ?? 999);
+        const pb = (b.priority ?? 999);
+        return pa - pb;
+      });
+
+      const top = sorted.slice(0, 3);
+
+      top.forEach((rec, idx) => {
+        const stepNum = idx + 1;
+        const title = rec.title || rec.name || rec.fix || `Fix ${stepNum}`;
         const why = rec.why || rec.reason || rec.description || rec.details || "";
-        const priority = rec.priority ?? rec.rank ?? rec.order ?? "";
-        const severity = rec.severity ?? rec.impact ?? "";
-
-        const metaBits = [];
-        if (priority !== "") metaBits.push(`Priority: ${priority}`);
-        if (severity !== "") metaBits.push(`Severity: ${severity}`);
-
-        const meta = metaBits.length ? `<div class="muted" style="margin-top:6px;">${metaBits.join(" • ")}</div>` : "";
+        const action = rec.action || rec.how || "";
 
         const div = document.createElement("div");
-        div.className = "rec";
+        div.className = "step";
         div.innerHTML = `
-          <h3>${escapeHtml(String(title))}</h3>
-          ${why ? `<p>${escapeHtml(String(why))}</p>` : `<p class="muted">No description provided.</p>`}
-          ${meta}
+          <div class="muted" style="font-weight:700; letter-spacing:0.02em;">STEP ${stepNum}</div>
+          <h3>${escapeHtml(title)}</h3>
+          ${action ? `<p style="margin:0;opacity:.9;">${escapeHtml(action)}</p>` : ""}
+          ${why ? `
+            <div class="meta"><strong>Why this helps:</strong> ${escapeHtml(why)}</div>
+          ` : ""}
         `;
-        recsEl.appendChild(div);
+        stepsEl.appendChild(div);
       });
+
+      // If more than 3 recs, show the rest as “Additional”
+      if (sorted.length > 3) {
+        const extraWrap = document.createElement("div");
+        extraWrap.className = "panel";
+        extraWrap.style.marginTop = "12px";
+        extraWrap.innerHTML = `<div class="muted" style="font-weight:700;">Additional notes</div>`;
+        const ul = document.createElement("ul");
+        ul.style.margin = "10px 0 0 18px";
+        ul.style.padding = "0";
+        ul.style.opacity = "0.85";
+        sorted.slice(3).forEach((r) => {
+          const li = document.createElement("li");
+          li.textContent = r.title || r.name || "Additional fix";
+          ul.appendChild(li);
+        });
+        extraWrap.appendChild(ul);
+        stepsEl.appendChild(extraWrap);
+      }
     }
 
-    function escapeHtml(str) {
-      return str.replace(/[&<>"']/g, (m) => ({
-        "&": "&amp;",
-        "<": "&lt;",
-        ">": "&gt;",
-        '"': "&quot;",
-        "'": "&#039;",
-      }[m]));
+    function overlayOn() {
+      overlay.classList.add("on");
+      overlay.setAttribute("aria-hidden", "false");
+    }
+    function overlayOff() {
+      overlay.classList.remove("on");
+      overlay.setAttribute("aria-hidden", "true");
     }
 
     form.addEventListener("submit", async (e) => {
@@ -234,37 +353,38 @@
       clearError();
 
       btn.disabled = true;
-      btn.textContent = "Working…";
+      btn.textContent = "Roomifying…";
+      overlayOn();
 
-      // Build payload matching what your Network "Request" showed
       const payload = {
-        goal: document.getElementById("goal").value,                  // e.g. "mixing"
+        goal: document.getElementById("goal").value,
         lengthFt: toNumber(document.getElementById("lengthFt").value),
         widthFt: toNumber(document.getElementById("widthFt").value),
         heightFt: toNumber(document.getElementById("heightFt").value),
         listeningDistanceFt: toNumber(document.getElementById("listeningDistanceFt").value),
         speakerDistanceFt: toNumber(document.getElementById("speakerDistanceFt").value),
-        surface: document.getElementById("surface").value,            // e.g. "mixed"
-        windows: document.getElementById("windows").value,            // "yes" / "no"
-        treatment: document.getElementById("treatment").value         // e.g. "none"
+        surface: document.getElementById("surface").value,
+        windows: document.getElementById("windows").value,
+        treatment: document.getElementById("treatment").value
       };
 
-      // Basic client-side validation
       const requiredNums = ["lengthFt","widthFt","heightFt","listeningDistanceFt","speakerDistanceFt"];
       for (const k of requiredNums) {
         if (payload[k] === null) {
+          overlayOff();
           showError("Please fill all numeric fields.");
           btn.disabled = false;
-          btn.textContent = "Get starter recommendation";
+          btn.textContent = "Let’s get you roomified";
           return;
         }
       }
       const requiredStrs = ["goal","surface","windows","treatment"];
       for (const k of requiredStrs) {
         if (!payload[k]) {
+          overlayOff();
           showError("Please select all dropdown fields.");
           btn.disabled = false;
-          btn.textContent = "Get starter recommendation";
+          btn.textContent = "Let’s get you roomified";
           return;
         }
       }
@@ -282,37 +402,44 @@
           const msg = (data && (data.error || data.message)) ? (data.error || data.message) : `Request failed (${res.status})`;
           throw new Error(msg);
         }
-
         if (!data || data.ok !== true) {
           throw new Error("API did not return ok:true");
         }
 
-        // ✅ Map response correctly (this fixes your "undefined" issue)
         const sessionId = data.sessionId || "—";
         const scores = data.scores || {};
         const validity = scores.validity ?? "—";
-        const roomScore = scores.roomScore ?? "—";
+        const roomScore = scores.roomScore ?? 0;
         const toneScore = scores.toneScore ?? "—";
 
-        resultsEl.style.display = "block";
-        sessionIdPill.textContent = `sessionId: ${sessionId}`;
-        validityEl.textContent = String(validity);
+        const health = getRoomHealth(Number(roomScore));
+        const nextTier = getNextTier(health);
+        const color = getHealthColor(health);
+
+        report.style.display = "block";
+        reportIdLine.textContent = `Roomify Report ID: ${sessionId}`;
+
+        healthStatusEl.textContent = health;
+        healthDot.style.background = color;
+
+        healthMessageEl.textContent = getHealthMessage(health);
+        healthPotentialEl.innerHTML = `<strong>With a few changes your room can reach:</strong> ${escapeHtml(nextTier)}.`;
+
         roomScoreEl.textContent = String(roomScore);
         toneScoreEl.textContent = String(toneScore);
+        validityEl.textContent = String(validity);
 
-        summaryTextEl.textContent =
-          `We generated ${Array.isArray(data.recommendations) ? data.recommendations.length : 0} fixes based on your inputs.`;
+        renderSteps(data.recommendations);
 
-        renderRecommendations(data.recommendations);
-
-        // Scroll to results on mobile
-        resultsEl.scrollIntoView({ behavior: "smooth", block: "start" });
+        // Smooth scroll to report
+        report.scrollIntoView({ behavior: "smooth", block: "start" });
 
       } catch (err) {
         showError(err && err.message ? err.message : "Something went wrong.");
       } finally {
+        overlayOff();
         btn.disabled = false;
-        btn.textContent = "Get starter recommendation";
+        btn.textContent = "Let’s get you roomified";
       }
     });
   </script>
