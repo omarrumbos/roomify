@@ -1,117 +1,320 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Roomify — Room Setup</title>
   <link rel="stylesheet" href="/style.css" />
   <style>
-    body { font-family: Arial, sans-serif; padding: 40px; }
-    .container { max-width: 900px; margin: auto; }
-    .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
-    input, select { padding: 8px; }
-    button { padding: 12px 18px; margin-top: 15px; cursor: pointer; }
-    .result { margin-top: 30px; padding: 20px; border-radius: 8px; background: #f2f2f2; }
-    .error { color: red; margin-top: 10px; }
+    /* Minimal fallback styling in case style.css is light */
+    .container { max-width: 980px; margin: 0 auto; padding: 40px 20px; }
+    h1 { font-size: 56px; margin: 0 0 12px; line-height: 1.05; letter-spacing: -0.02em; }
+    .sub { margin: 0 0 22px; opacity: 0.8; }
+    .row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-top: 14px; }
+    .row.two { grid-template-columns: repeat(2, 1fr); }
+    label { display: block; font-size: 12px; opacity: 0.75; margin-bottom: 6px; }
+    input, select {
+      width: 100%;
+      padding: 12px 12px;
+      border: 1px solid rgba(0,0,0,0.12);
+      border-radius: 10px;
+      font-size: 14px;
+      background: #fff;
+      outline: none;
+    }
+    button {
+      margin-top: 18px;
+      padding: 12px 16px;
+      border-radius: 12px;
+      border: 0;
+      background: #111;
+      color: #fff;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    button:disabled { opacity: 0.6; cursor: not-allowed; }
+    .card {
+      margin-top: 26px;
+      border-radius: 14px;
+      border: 1px solid rgba(0,0,0,0.12);
+      padding: 18px;
+      background: rgba(0,0,0,0.02);
+    }
+    .muted { opacity: 0.7; font-size: 13px; }
+    .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 10px; }
+    .pill { display: inline-block; padding: 6px 10px; border-radius: 999px; background: rgba(0,0,0,0.06); font-size: 12px; }
+    .rec { padding: 12px; border-radius: 12px; border: 1px solid rgba(0,0,0,0.10); background: #fff; margin-top: 10px; }
+    .rec h3 { margin: 0 0 6px; font-size: 16px; }
+    .rec p { margin: 0; font-size: 13px; opacity: 0.85; }
+    .error { color: #b00020; font-weight: 600; margin-top: 10px; }
+    @media (max-width: 780px){
+      h1 { font-size: 40px; }
+      .row { grid-template-columns: 1fr; }
+      .row.two { grid-template-columns: 1fr; }
+      .grid2 { grid-template-columns: 1fr; }
+    }
   </style>
 </head>
 <body>
+  <div class="container">
+    <h1>Tell us about your room</h1>
+    <p class="sub">Physics-first. No preaching. Just clarity.</p>
 
-<div class="container">
-  <h1>Tell us about your room</h1>
-  <p>Physics-first. No preaching. Just clarity.</p>
-  <p><strong>Units:</strong> feet</p>
+    <div class="muted"><strong>Units:</strong> feet</div>
 
-  <form id="roomForm">
-    <div class="grid">
-      <input type="number" name="lengthFt" placeholder="Length (ft)" required />
-      <input type="number" name="widthFt" placeholder="Width (ft)" required />
-      <input type="number" name="heightFt" placeholder="Height (ft)" required />
+    <form id="roomForm" autocomplete="off">
+      <div class="row">
+        <div>
+          <label for="lengthFt">Length (ft)</label>
+          <input id="lengthFt" name="lengthFt" type="number" min="1" step="0.1" required />
+        </div>
+        <div>
+          <label for="widthFt">Width (ft)</label>
+          <input id="widthFt" name="widthFt" type="number" min="1" step="0.1" required />
+        </div>
+        <div>
+          <label for="heightFt">Height (ft)</label>
+          <input id="heightFt" name="heightFt" type="number" min="1" step="0.1" required />
+        </div>
+      </div>
 
-      <input type="number" name="listeningDistanceFt" placeholder="Listening distance (ft)" />
-      <input type="number" name="speakerDistanceFt" placeholder="Speaker distance from wall (ft)" />
+      <div class="row">
+        <div>
+          <label for="listeningDistanceFt">Listening distance (ft)</label>
+          <input id="listeningDistanceFt" name="listeningDistanceFt" type="number" min="0" step="0.1" required />
+        </div>
+        <div>
+          <label for="speakerDistanceFt">Speaker distance from wall (ft)</label>
+          <input id="speakerDistanceFt" name="speakerDistanceFt" type="number" min="0" step="0.1" required />
+        </div>
+        <div>
+          <label for="windows">Window(s) in room?</label>
+          <select id="windows" name="windows" required>
+            <option value="">Select…</option>
+            <option value="yes">Yes</option>
+            <option value="no">No</option>
+          </select>
+        </div>
+      </div>
 
-      <select name="windows">
-        <option value="">Window(s) in room?</option>
-        <option value="yes">Yes</option>
-        <option value="no">No</option>
-      </select>
+      <div class="row">
+        <div>
+          <label for="surface">Surface type</label>
+          <select id="surface" name="surface" required>
+            <option value="">Select…</option>
+            <option value="hard">Hard</option>
+            <option value="carpet">Carpet</option>
+            <option value="mixed">Mixed</option>
+          </select>
+        </div>
+        <div>
+          <label for="treatment">Current treatment</label>
+          <select id="treatment" name="treatment" required>
+            <option value="">Select…</option>
+            <option value="none">None</option>
+            <option value="basic">Basic (some panels/curtains)</option>
+            <option value="treated">Treated (panels + bass traps)</option>
+          </select>
+        </div>
+        <div>
+          <label for="goal">Goal</label>
+          <select id="goal" name="goal" required>
+            <option value="">Select…</option>
+            <option value="mixing">Mixing / production</option>
+            <option value="listening">Music listening</option>
+            <option value="recording">Recording / vocals</option>
+          </select>
+        </div>
+      </div>
 
-      <select name="surface">
-        <option value="">Surface type</option>
-        <option value="hard">Hard (concrete, glass, tile)</option>
-        <option value="mixed">Mixed</option>
-        <option value="soft">Soft (carpet, curtains)</option>
-      </select>
+      <button id="submitBtn" type="submit">Get starter recommendation</button>
+      <div id="error" class="error" style="display:none;"></div>
+    </form>
 
-      <select name="treatment">
-        <option value="">Current treatment</option>
-        <option value="none">None</option>
-        <option value="partial">Partial</option>
-        <option value="full">Full</option>
-      </select>
+    <div id="results" class="card" style="display:none;">
+      <div class="muted">Session</div>
+      <div style="margin-top:6px;">
+        <span class="pill" id="sessionIdPill">sessionId: —</span>
+      </div>
 
-      <select name="goal">
-        <option value="">Goal</option>
-        <option value="mixing">Mixing / production</option>
-        <option value="recording">Recording</option>
-        <option value="general">General listening</option>
-      </select>
+      <div class="grid2" style="margin-top:14px;">
+        <div class="card" style="margin:0;">
+          <div class="muted">Scores</div>
+          <div style="margin-top:10px; line-height:1.9;">
+            <div><strong>Validity:</strong> <span id="validity">—</span></div>
+            <div><strong>Room Score:</strong> <span id="roomScore">—</span></div>
+            <div><strong>Tone Score:</strong> <span id="toneScore">—</span></div>
+          </div>
+        </div>
+        <div class="card" style="margin:0;">
+          <div class="muted">Summary</div>
+          <div style="margin-top:10px;">
+            <div id="summaryText" class="muted">—</div>
+          </div>
+        </div>
+      </div>
+
+      <div style="margin-top:16px;">
+        <div class="muted">Recommendations</div>
+        <div id="recs"></div>
+      </div>
     </div>
+  </div>
 
-    <button type="submit">Get starter recommendation</button>
-  </form>
+  <script>
+    const form = document.getElementById("roomForm");
+    const btn = document.getElementById("submitBtn");
+    const errorEl = document.getElementById("error");
 
-  <div id="error" class="error"></div>
-  <div id="result" class="result" style="display:none;"></div>
-</div>
+    const resultsEl = document.getElementById("results");
+    const sessionIdPill = document.getElementById("sessionIdPill");
+    const validityEl = document.getElementById("validity");
+    const roomScoreEl = document.getElementById("roomScore");
+    const toneScoreEl = document.getElementById("toneScore");
+    const summaryTextEl = document.getElementById("summaryText");
+    const recsEl = document.getElementById("recs");
 
-<script>
-  const form = document.getElementById("roomForm");
-  const resultDiv = document.getElementById("result");
-  const errorDiv = document.getElementById("error");
+    function showError(msg) {
+      errorEl.textContent = msg;
+      errorEl.style.display = "block";
+    }
+    function clearError() {
+      errorEl.textContent = "";
+      errorEl.style.display = "none";
+    }
 
-  form.addEventListener("submit", async (e) => {
-    e.preventDefault();
-    errorDiv.textContent = "";
-    resultDiv.style.display = "none";
+    function toNumber(value) {
+      const n = Number(value);
+      return Number.isFinite(n) ? n : null;
+    }
 
-    const formData = new FormData(form);
-    const data = Object.fromEntries(formData.entries());
-
-    try {
-      const response = await fetch("/api/recommend", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(data)
-      });
-
-      if (!response.ok) {
-        throw new Error("Server returned an error");
+    function renderRecommendations(recommendations) {
+      recsEl.innerHTML = "";
+      if (!Array.isArray(recommendations) || recommendations.length === 0) {
+        recsEl.innerHTML = `<div class="muted" style="margin-top:8px;">No recommendations returned.</div>`;
+        return;
       }
 
-      const json = await response.json();
+      recommendations.forEach((rec, idx) => {
+        // Flexible rendering: works even if rec fields differ a bit
+        const title = rec.title || rec.name || rec.fix || `Recommendation ${idx + 1}`;
+        const why = rec.why || rec.reason || rec.description || rec.details || "";
+        const priority = rec.priority ?? rec.rank ?? rec.order ?? "";
+        const severity = rec.severity ?? rec.impact ?? "";
 
-      resultDiv.innerHTML = `
-        <h2>${json.title}</h2>
-        <p>${json.message}</p>
-        <p><strong>Severity:</strong> ${json.severity}</p>
-        <p><strong>Priority:</strong> ${json.topPriority}</p>
-        <p><strong>Reflection Score:</strong> ${json.scores.reflection}</p>
-        <p><strong>Bass Score:</strong> ${json.scores.bass}</p>
-        <p style="margin-top:10px; font-size:12px; color:#555;">
-          ${json.note}
-        </p>
-      `;
+        const metaBits = [];
+        if (priority !== "") metaBits.push(`Priority: ${priority}`);
+        if (severity !== "") metaBits.push(`Severity: ${severity}`);
 
-      resultDiv.style.display = "block";
+        const meta = metaBits.length ? `<div class="muted" style="margin-top:6px;">${metaBits.join(" • ")}</div>` : "";
 
-    } catch (err) {
-      console.error(err);
-      errorDiv.textContent = "Something went wrong. Please try again.";
+        const div = document.createElement("div");
+        div.className = "rec";
+        div.innerHTML = `
+          <h3>${escapeHtml(String(title))}</h3>
+          ${why ? `<p>${escapeHtml(String(why))}</p>` : `<p class="muted">No description provided.</p>`}
+          ${meta}
+        `;
+        recsEl.appendChild(div);
+      });
     }
-  });
-</script>
 
+    function escapeHtml(str) {
+      return str.replace(/[&<>"']/g, (m) => ({
+        "&": "&amp;",
+        "<": "&lt;",
+        ">": "&gt;",
+        '"': "&quot;",
+        "'": "&#039;",
+      }[m]));
+    }
+
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      clearError();
+
+      btn.disabled = true;
+      btn.textContent = "Working…";
+
+      // Build payload matching what your Network "Request" showed
+      const payload = {
+        goal: document.getElementById("goal").value,                  // e.g. "mixing"
+        lengthFt: toNumber(document.getElementById("lengthFt").value),
+        widthFt: toNumber(document.getElementById("widthFt").value),
+        heightFt: toNumber(document.getElementById("heightFt").value),
+        listeningDistanceFt: toNumber(document.getElementById("listeningDistanceFt").value),
+        speakerDistanceFt: toNumber(document.getElementById("speakerDistanceFt").value),
+        surface: document.getElementById("surface").value,            // e.g. "mixed"
+        windows: document.getElementById("windows").value,            // "yes" / "no"
+        treatment: document.getElementById("treatment").value         // e.g. "none"
+      };
+
+      // Basic client-side validation
+      const requiredNums = ["lengthFt","widthFt","heightFt","listeningDistanceFt","speakerDistanceFt"];
+      for (const k of requiredNums) {
+        if (payload[k] === null) {
+          showError("Please fill all numeric fields.");
+          btn.disabled = false;
+          btn.textContent = "Get starter recommendation";
+          return;
+        }
+      }
+      const requiredStrs = ["goal","surface","windows","treatment"];
+      for (const k of requiredStrs) {
+        if (!payload[k]) {
+          showError("Please select all dropdown fields.");
+          btn.disabled = false;
+          btn.textContent = "Get starter recommendation";
+          return;
+        }
+      }
+
+      try {
+        const res = await fetch("/api/recommend", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+
+        const data = await res.json().catch(() => null);
+
+        if (!res.ok) {
+          const msg = (data && (data.error || data.message)) ? (data.error || data.message) : `Request failed (${res.status})`;
+          throw new Error(msg);
+        }
+
+        if (!data || data.ok !== true) {
+          throw new Error("API did not return ok:true");
+        }
+
+        // ✅ Map response correctly (this fixes your "undefined" issue)
+        const sessionId = data.sessionId || "—";
+        const scores = data.scores || {};
+        const validity = scores.validity ?? "—";
+        const roomScore = scores.roomScore ?? "—";
+        const toneScore = scores.toneScore ?? "—";
+
+        resultsEl.style.display = "block";
+        sessionIdPill.textContent = `sessionId: ${sessionId}`;
+        validityEl.textContent = String(validity);
+        roomScoreEl.textContent = String(roomScore);
+        toneScoreEl.textContent = String(toneScore);
+
+        summaryTextEl.textContent =
+          `We generated ${Array.isArray(data.recommendations) ? data.recommendations.length : 0} fixes based on your inputs.`;
+
+        renderRecommendations(data.recommendations);
+
+        // Scroll to results on mobile
+        resultsEl.scrollIntoView({ behavior: "smooth", block: "start" });
+
+      } catch (err) {
+        showError(err && err.message ? err.message : "Something went wrong.");
+      } finally {
+        btn.disabled = false;
+        btn.textContent = "Get starter recommendation";
+      }
+    });
+  </script>
 </body>
 </html>
