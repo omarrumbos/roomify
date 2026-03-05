@@ -1,2 +1,5 @@
 node_modules/
-node_modules/
+
+waitlist.csv
+beta_sessions.jsonl
+.env
